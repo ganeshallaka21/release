@@ -58,14 +58,19 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          mvn -B verify sonar:sonar \
+          mvn -B clean verify \
+            org.sonarsource.scanner.maven:sonar-maven-plugin:5.4.0.6343:sonar \
             -Dsonar.projectKey=releasepulse \
             -Dsonar.projectName=ReleasePulse \
             -Dsonar.host.url="$SONAR_HOST_URL" \
             -Dsonar.token="$SONAR_TOKEN"
 
-      - name: Wait for SonarQube processing
-        run: sleep 10
+      - name: Check SonarQube report
+        run: |
+          echo "Checking SonarQube scanner output..."
+          ls -la
+          ls -la .scannerwork || true
+          test -f .scannerwork/report-task.txt
 
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1
