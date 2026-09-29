@@ -59,4 +59,11 @@
             </plugin>
         </plugins>
     </build>
+    <distributionManagement>
+    <repository>
+        <id>nexus-releases</id>
+        <name>ReleasePulse Nexus</name>
+        <url>${env.NEXUS_URL}</url>
+    </repository>
+</distributionManagement>
 </project>
