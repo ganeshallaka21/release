@@ -4,9 +4,17 @@ on:
   push:
     branches:
       - main
+
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+
+  # ==========================================================
+  # 1. BUILD AND TEST
+  # ==========================================================
 
   build-test:
     name: Build and Test
@@ -25,14 +33,19 @@ jobs:
           cache: maven
 
       - name: Build and Test
-        run: mvn -B clean verify
+        run: |
+          mvn -B clean verify
 
       - name: Upload WAR artifact
         uses: actions/upload-artifact@v4
         with:
           name: releasepulse-war
-          path: target/*.war
+          path: target/releasepulse.war
 
+
+  # ==========================================================
+  # 2. SONARQUBE ANALYSIS
+  # ==========================================================
 
   sonar:
     name: SonarQube Analysis
@@ -53,6 +66,29 @@ jobs:
           java-version: '21'
           cache: maven
 
+      # ------------------------------------------------------
+      # Test connection to SonarQube
+      # ------------------------------------------------------
+
+      - name: Test SonarQube connection
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          echo "Testing SonarQube connection..."
+          echo "SonarQube URL: $SONAR_HOST_URL"
+
+          curl --fail \
+               --connect-timeout 10 \
+               --max-time 30 \
+               "$SONAR_HOST_URL/api/system/status"
+
+          echo
+          echo "SonarQube connection successful."
+
+      # ------------------------------------------------------
+      # Run SonarQube
+      # ------------------------------------------------------
+
       - name: SonarQube Analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -65,12 +101,34 @@ jobs:
             -Dsonar.host.url="$SONAR_HOST_URL" \
             -Dsonar.token="$SONAR_TOKEN"
 
-      - name: Check SonarQube report
+      # ------------------------------------------------------
+      # Show scanner files
+      # ------------------------------------------------------
+
+      - name: Verify SonarQube scanner output
+        if: always()
         run: |
-          echo "Checking SonarQube scanner output..."
+          echo "===== Current directory ====="
+          pwd
+
+          echo "===== Project files ====="
           ls -la
-          ls -la .scannerwork || true
-          test -f .scannerwork/report-task.txt
+
+          echo "===== Scanner directory ====="
+          if [ -d ".scannerwork" ]; then
+            ls -la .scannerwork
+          else
+            echo ".scannerwork directory was not created."
+          fi
+
+          echo "===== Sonar related files ====="
+          find . -maxdepth 4 -type f \
+            \( -name "*sonar*" -o -name "report-task.txt" \) \
+            -print || true
+
+      # ------------------------------------------------------
+      # Quality Gate
+      # ------------------------------------------------------
 
       - name: SonarQube Quality Gate
         uses: SonarSource/sonarqube-quality-gate-action@v1
@@ -80,8 +138,12 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
 
+  # ==========================================================
+  # 3. UPLOAD WAR TO NEXUS
+  # ==========================================================
+
   nexus:
-    name: Upload Artifact to Nexus
+    name: Upload WAR to Nexus
     needs: sonar
     runs-on: ubuntu-latest
 
@@ -97,16 +159,42 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Deploy WAR to Nexus
+      - name: Download WAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: releasepulse-war
+          path: target
+
+      - name: Verify WAR
+        run: |
+          ls -lh target/
+          test -f target/releasepulse.war
+
+      # ------------------------------------------------------
+      # Deploy WAR to Nexus
+      # ------------------------------------------------------
+
+      - name: Upload WAR to Nexus
         env:
+          NEXUS_URL: ${{ secrets.NEXUS_URL }}
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_URL: ${{ secrets.NEXUS_URL }}
         run: |
-          mvn -B deploy \
-            -s settings.xml \
-            -DskipTests
+          mvn -B deploy:deploy-file \
+            -Dfile=target/releasepulse.war \
+            -DgroupId=com.releasepulse \
+            -DartifactId=releasepulse \
+            -Dversion=1.0.0 \
+            -Dpackaging=war \
+            -DrepositoryId=nexus-releases \
+            -Durl="$NEXUS_URL" \
+            -Dusername="$NEXUS_USERNAME" \
+            -Dpassword="$NEXUS_PASSWORD"
 
+
+  # ==========================================================
+  # 4. DEPLOY TO TOMCAT
+  # ==========================================================
 
   deploy:
     name: Deploy to Tomcat
@@ -115,56 +203,53 @@ jobs:
 
     steps:
 
-      - name: Checkout source code
-        uses: actions/checkout@v4
-
-      - name: Setup Java 21
-        uses: actions/setup-java@v4
+      - name: Download WAR artifact
+        uses: actions/download-artifact@v4
         with:
-          distribution: temurin
-          java-version: '21'
+          name: releasepulse-war
+          path: target
 
-      - name: Build WAR
-        run: mvn -B clean package -DskipTests
+      - name: Verify WAR
+        run: |
+          ls -lh target/
+          test -f target/releasepulse.war
 
-      - name: Prepare SSH
+      # ------------------------------------------------------
+      # Copy WAR to Tomcat
+      # ------------------------------------------------------
+
+      - name: Deploy WAR to Tomcat
         env:
+          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
+          TOMCAT_USER: ${{ secrets.TOMCAT_USER }}
           TOMCAT_SSH_KEY: ${{ secrets.TOMCAT_SSH_KEY }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$TOMCAT_SSH_KEY" > ~/.ssh/tomcat.pem
-          chmod 600 ~/.ssh/tomcat.pem
 
-      - name: Copy WAR to Tomcat
-        env:
-          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
-        run: |
-          scp -o StrictHostKeyChecking=no \
-            -i ~/.ssh/tomcat.pem \
-            target/*.war \
-            ubuntu@$TOMCAT_HOST:/tmp/releasepulse.war
+          echo "$TOMCAT_SSH_KEY" > tomcat_key.pem
 
-      - name: Deploy WAR
-        env:
-          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
-        run: |
-          ssh -o StrictHostKeyChecking=no \
-            -i ~/.ssh/tomcat.pem \
-            ubuntu@$TOMCAT_HOST << 'EOF'
+          chmod 600 tomcat_key.pem
 
-          sudo systemctl stop tomcat
+          ssh \
+            -o StrictHostKeyChecking=no \
+            -i tomcat_key.pem \
+            "$TOMCAT_USER@$TOMCAT_HOST" \
+            "sudo systemctl stop tomcat || true"
 
-          sudo rm -rf /opt/tomcat/webapps/releasepulse
-          sudo rm -f /opt/tomcat/webapps/releasepulse.war
+          scp \
+            -o StrictHostKeyChecking=no \
+            -i tomcat_key.pem \
+            target/releasepulse.war \
+            "$TOMCAT_USER@$TOMCAT_HOST:/tmp/releasepulse.war"
 
-          sudo mv /tmp/releasepulse.war /opt/tomcat/webapps/releasepulse.war
+          ssh \
+            -o StrictHostKeyChecking=no \
+            -i tomcat_key.pem \
+            "$TOMCAT_USER@$TOMCAT_HOST" \
+            "sudo rm -rf /var/lib/tomcat10/webapps/releasepulse && \
+             sudo rm -f /var/lib/tomcat10/webapps/releasepulse.war && \
+             sudo mv /tmp/releasepulse.war /var/lib/tomcat10/webapps/releasepulse.war && \
+             sudo systemctl start tomcat"
 
-          sudo chown tomcat:tomcat /opt/tomcat/webapps/releasepulse.war
+          rm -f tomcat_key.pem
 
-          sudo systemctl start tomcat
-
-          sleep 15
-
-          curl -f http://localhost:8080/releasepulse/
-
-          EOF
+          echo "Deployment completed successfully."

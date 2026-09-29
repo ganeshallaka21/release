@@ -14,7 +14,7 @@
     <name>ReleasePulse</name>
     <description>Release and deployment intelligence dashboard</description>
 
-    <!-- Project Properties -->
+    <!-- Properties -->
     <properties>
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -24,7 +24,7 @@
     <!-- Dependencies -->
     <dependencies>
 
-        <!-- Jakarta Servlet API -->
+        <!-- Jakarta Servlet -->
         <dependency>
             <groupId>jakarta.servlet</groupId>
             <artifactId>jakarta.servlet-api</artifactId>
@@ -42,14 +42,14 @@
 
     </dependencies>
 
-    <!-- Build Configuration -->
+    <!-- Build -->
     <build>
 
         <finalName>releasepulse</finalName>
 
         <plugins>
 
-            <!-- Maven Compiler -->
+            <!-- Java Compiler -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
@@ -59,21 +59,21 @@
                 </configuration>
             </plugin>
 
-            <!-- Maven WAR -->
+            <!-- WAR Package -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-war-plugin</artifactId>
                 <version>3.4.0</version>
             </plugin>
 
-            <!-- Maven Surefire / Unit Tests -->
+            <!-- Unit Tests -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.0</version>
             </plugin>
 
-            <!-- SonarQube Maven Scanner -->
+            <!-- SonarQube Scanner -->
             <plugin>
                 <groupId>org.sonarsource.scanner.maven</groupId>
                 <artifactId>sonar-maven-plugin</artifactId>
