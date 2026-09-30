@@ -148,7 +148,7 @@ jobs:
               exit 1
             fi
 
-            sleep 25
+            sleep 5
 
           done
 
