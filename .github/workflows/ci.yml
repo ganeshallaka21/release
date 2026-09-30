@@ -1,4 +1,3 @@
-```yaml
 name: ReleasePulse CI/CD
 
 on:
