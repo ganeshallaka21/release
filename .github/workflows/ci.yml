@@ -137,16 +137,6 @@ jobs:
           fi
 
           echo
-          echo "Checking .scannerwork..."
-
-          if [ -d ".scannerwork" ]; then
-            echo ".scannerwork EXISTS"
-            ls -la .scannerwork
-          else
-            echo ".scannerwork DOES NOT EXIST"
-          fi
-
-          echo
           echo "======================================"
           echo "SEARCHING FOR SONAR REPORT FILES"
           echo "======================================"
@@ -169,7 +159,7 @@ jobs:
 
 
   # ==========================================================
-  # 3. NEXUS
+  # 3. UPLOAD WAR TO NEXUS
   # ==========================================================
 
   nexus:
@@ -189,11 +179,13 @@ jobs:
           java-version: '21'
           cache: maven
 
+
       - name: Download WAR artifact
         uses: actions/download-artifact@v4
         with:
           name: releasepulse-war
           path: target
+
 
       - name: Verify WAR
         run: |
@@ -209,17 +201,57 @@ jobs:
           echo "WAR file found successfully."
 
 
+      # ------------------------------------------------------
+      # Create Maven settings.xml for Nexus authentication
+      # ------------------------------------------------------
+
+      - name: Configure Maven Nexus credentials
+        env:
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+        run: |
+          echo "======================================"
+          echo "CONFIGURING NEXUS AUTHENTICATION"
+          echo "======================================"
+
+          cat > nexus-settings.xml <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+            <servers>
+              <server>
+                <id>nexus-releases</id>
+                <username>${NEXUS_USERNAME}</username>
+                <password>${NEXUS_PASSWORD}</password>
+              </server>
+            </servers>
+
+          </settings>
+          EOF
+
+          echo "Maven Nexus credentials configured."
+
+
+      # ------------------------------------------------------
+      # Upload WAR
+      # ------------------------------------------------------
+
       - name: Upload WAR to Nexus
         env:
           NEXUS_URL: ${{ secrets.NEXUS_URL }}
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
         run: |
           echo "======================================"
           echo "UPLOADING WAR TO NEXUS"
           echo "======================================"
 
-          mvn -B deploy:deploy-file \
+          echo "Nexus repository:"
+          echo "$NEXUS_URL"
+
+          mvn -B \
+            -s nexus-settings.xml \
+            deploy:deploy-file \
             -Dfile=target/releasepulse.war \
             -DgroupId=com.releasepulse \
             -DartifactId=releasepulse \
@@ -227,15 +259,24 @@ jobs:
             -Dpackaging=war \
             -DrepositoryId=nexus-releases \
             -Durl="$NEXUS_URL" \
-            -Dusername="$NEXUS_USERNAME" \
-            -Dpassword="$NEXUS_PASSWORD"
+            -DgeneratePom=true
 
           echo
-          echo "WAR uploaded to Nexus successfully."
+          echo "======================================"
+          echo "WAR UPLOADED TO NEXUS SUCCESSFULLY"
+          echo "======================================"
+
+
+      - name: Remove Nexus credentials
+        if: always()
+        run: |
+          rm -f nexus-settings.xml
+
+          echo "Temporary Nexus credentials removed."
 
 
   # ==========================================================
-  # 4. TOMCAT DEPLOYMENT
+  # 4. DEPLOY TO TOMCAT
   # ==========================================================
 
   deploy:
@@ -250,6 +291,7 @@ jobs:
         with:
           name: releasepulse-war
           path: target
+
 
       - name: Verify WAR
         run: |
