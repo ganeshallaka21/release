@@ -8,7 +8,7 @@ on:
 jobs:
 
   # ==========================================================
-  # BUILD AND TEST
+  # 1. BUILD AND TEST
   # ==========================================================
   build:
     name: Build and Test
@@ -38,7 +38,7 @@ jobs:
 
 
   # ==========================================================
-  # SONARQUBE ANALYSIS
+  # 2. SONARQUBE ANALYSIS
   # ==========================================================
   sonarqube:
     name: SonarQube Analysis
@@ -82,7 +82,9 @@ jobs:
         run: |
           echo "Checking SonarQube scanner output..."
 
-          if [ ! -f ".scannerwork/report-task.txt" ]; then
+          REPORT_FILE="target/sonar/report-task.txt"
+
+          if [ ! -f "$REPORT_FILE" ]; then
             echo "ERROR: SonarQube report-task.txt was not created."
             echo
             echo "Current directory:"
@@ -91,14 +93,15 @@ jobs:
             echo "Directory contents:"
             ls -la
             echo
-            echo "Looking for scanner files:"
-            find . -maxdepth 3 -type f -name "report-task.txt" -print
+            echo "Searching for report-task.txt:"
+            find . -type f -name "report-task.txt" -print
             exit 1
           fi
 
-          echo "SonarQube scanner report found."
+          echo "SonarQube scanner report found:"
+          echo "$REPORT_FILE"
           echo
-          cat .scannerwork/report-task.txt
+          cat "$REPORT_FILE"
 
       - name: Wait for SonarQube Quality Gate
         env:
@@ -107,7 +110,7 @@ jobs:
         run: |
           set -e
 
-          REPORT_FILE=".scannerwork/report-task.txt"
+          REPORT_FILE="target/sonar/report-task.txt"
 
           CE_TASK_ID=$(grep '^ceTaskId=' "$REPORT_FILE" | cut -d'=' -f2)
 
@@ -117,6 +120,8 @@ jobs:
           fi
 
           echo "SonarQube task ID: $CE_TASK_ID"
+
+          STATUS=""
 
           for i in {1..60}; do
 
@@ -147,13 +152,12 @@ jobs:
             exit 1
           fi
 
-          PROJECT_KEY="releasepulse"
-
+          echo
           echo "Checking SonarQube Quality Gate..."
 
           QUALITY_GATE=$(curl -s \
             -u "${SONAR_TOKEN}:" \
-            "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${PROJECT_KEY}")
+            "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=releasepulse")
 
           echo "$QUALITY_GATE"
 
@@ -171,7 +175,7 @@ jobs:
 
 
   # ==========================================================
-  # UPLOAD WAR TO NEXUS
+  # 3. UPLOAD WAR TO NEXUS
   # ==========================================================
   nexus:
     name: Upload WAR to Nexus
@@ -220,7 +224,7 @@ jobs:
 
 
   # ==========================================================
-  # DEPLOY TO TOMCAT
+  # 4. DEPLOY TO TOMCAT
   # ==========================================================
   deploy:
     name: Deploy to Tomcat
@@ -240,8 +244,10 @@ jobs:
 
       - name: Verify WAR file
         run: |
+          echo "Checking WAR file..."
           ls -lh target/
           test -f target/releasepulse.war
+          echo "WAR file found."
 
       - name: Deploy WAR to Tomcat
         env:
