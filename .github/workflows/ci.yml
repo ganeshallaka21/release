@@ -1,3 +1,4 @@
+```yaml
 name: ReleasePulse CI/CD
 
 on:
@@ -10,6 +11,7 @@ jobs:
   # ==========================================================
   # 1. BUILD AND TEST
   # ==========================================================
+
   build:
     name: Build and Test
     runs-on: ubuntu-latest
@@ -40,6 +42,7 @@ jobs:
   # ==========================================================
   # 2. SONARQUBE ANALYSIS
   # ==========================================================
+
   sonarqube:
     name: SonarQube Analysis
     runs-on: ubuntu-latest
@@ -62,7 +65,9 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           echo "Testing SonarQube connection..."
+
           curl -f "${SONAR_HOST_URL}/api/system/status"
+
           echo
           echo "SonarQube connection successful."
 
@@ -101,6 +106,7 @@ jobs:
           echo "SonarQube scanner report found:"
           echo "$REPORT_FILE"
           echo
+
           cat "$REPORT_FILE"
 
       - name: Wait for SonarQube Quality Gate
@@ -177,6 +183,7 @@ jobs:
   # ==========================================================
   # 3. UPLOAD WAR TO NEXUS
   # ==========================================================
+
   nexus:
     name: Upload WAR to Nexus
     runs-on: ubuntu-latest
@@ -203,8 +210,11 @@ jobs:
       - name: Verify WAR file
         run: |
           echo "Checking WAR file..."
+
           ls -lh target/
+
           test -f target/releasepulse.war
+
           echo "WAR file found."
 
       - name: Upload WAR to Nexus
@@ -226,6 +236,7 @@ jobs:
   # ==========================================================
   # 4. DEPLOY TO TOMCAT
   # ==========================================================
+
   deploy:
     name: Deploy to Tomcat
     runs-on: ubuntu-latest
@@ -245,9 +256,31 @@ jobs:
       - name: Verify WAR file
         run: |
           echo "Checking WAR file..."
+
           ls -lh target/
+
           test -f target/releasepulse.war
+
           echo "WAR file found."
+
+      - name: Test Tomcat connection
+        env:
+          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
+        run: |
+          echo "Testing Tomcat connection..."
+
+          if [ -z "$TOMCAT_HOST" ]; then
+            echo "ERROR: TOMCAT_HOST secret is empty."
+            exit 1
+          fi
+
+          echo "Tomcat host: ${TOMCAT_HOST}"
+
+          curl -f \
+            "http://${TOMCAT_HOST}:8080/"
+
+          echo
+          echo "Tomcat connection successful."
 
       - name: Deploy WAR to Tomcat
         env:
@@ -256,6 +289,24 @@ jobs:
           TOMCAT_PASSWORD: ${{ secrets.TOMCAT_PASSWORD }}
         run: |
           echo "Deploying ReleasePulse to Tomcat..."
+
+          if [ -z "$TOMCAT_HOST" ]; then
+            echo "ERROR: TOMCAT_HOST secret is empty."
+            exit 1
+          fi
+
+          if [ -z "$TOMCAT_USERNAME" ]; then
+            echo "ERROR: TOMCAT_USERNAME secret is empty."
+            exit 1
+          fi
+
+          if [ -z "$TOMCAT_PASSWORD" ]; then
+            echo "ERROR: TOMCAT_PASSWORD secret is empty."
+            exit 1
+          fi
+
+          echo "Tomcat host configured: ${TOMCAT_HOST}"
+          echo "Tomcat username configured."
 
           curl -f \
             -u "${TOMCAT_USERNAME}:${TOMCAT_PASSWORD}" \
@@ -269,6 +320,8 @@ jobs:
         env:
           TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
         run: |
+          echo "Waiting for ReleasePulse to start..."
+
           sleep 10
 
           curl -f \
@@ -276,3 +329,4 @@ jobs:
 
           echo
           echo "ReleasePulse deployment verified successfully."
+```
