@@ -251,7 +251,7 @@ jobs:
 
       - name: Deploy WAR to Tomcat
         env:
-          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST_URL }}
+          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
           TOMCAT_USERNAME: ${{ secrets.TOMCAT_USERNAME }}
           TOMCAT_PASSWORD: ${{ secrets.TOMCAT_PASSWORD }}
         run: |
