@@ -5,18 +5,12 @@ on:
     branches:
       - main
 
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
 jobs:
 
   # ==========================================================
   # 1. BUILD AND TEST
   # ==========================================================
-
-  build-test:
+  build:
     name: Build and Test
     runs-on: ubuntu-latest
 
@@ -46,18 +40,15 @@ jobs:
   # ==========================================================
   # 2. SONARQUBE ANALYSIS
   # ==========================================================
-
-  sonar:
+  sonarqube:
     name: SonarQube Analysis
-    needs: build-test
     runs-on: ubuntu-latest
+    needs: build
 
     steps:
 
       - name: Checkout source code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -67,92 +58,36 @@ jobs:
           cache: maven
 
       - name: Test SonarQube connection
-        env:
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          echo "======================================"
-          echo "TESTING SONARQUBE CONNECTION"
-          echo "======================================"
-
-          echo "SonarQube URL: $SONAR_HOST_URL"
-
-          curl --fail \
-            --connect-timeout 10 \
-            --max-time 30 \
-            "$SONAR_HOST_URL/api/system/status"
-
-          echo
-          echo "SonarQube connection successful."
-
+          curl -f "${{ secrets.SONAR_HOST_URL }}/api/system/status"
 
       - name: SonarQube Analysis
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          echo "======================================"
-          echo "STARTING SONARQUBE ANALYSIS"
-          echo "======================================"
-
           mvn -B clean verify \
-            org.sonarsource.scanner.maven:sonar-maven-plugin:5.4.0.6343:sonar \
+            org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
             -Dsonar.projectKey=releasepulse \
             -Dsonar.projectName=ReleasePulse \
-            -Dsonar.host.url="$SONAR_HOST_URL" \
-            -Dsonar.token="$SONAR_TOKEN"
-
-          echo
-          echo "======================================"
-          echo "SONARQUBE ANALYSIS COMPLETED"
-          echo "======================================"
-
+            -Dsonar.host.url="${SONAR_HOST_URL}" \
+            -Dsonar.token="${SONAR_TOKEN}"
 
       - name: Check SonarQube scanner result
-        if: always()
         run: |
-          echo "======================================"
-          echo "CHECKING SONARQUBE REPORT"
-          echo "======================================"
-
-          echo
-          echo "Checking target/sonar..."
-
-          if [ -d "target/sonar" ]; then
-            echo "target/sonar EXISTS"
-            echo
-            ls -la target/sonar
+          echo "Checking SonarQube scanner output..."
+          if [ -f ".scannerwork/report-task.txt" ]; then
+            echo "SonarQube scanner report found."
+            cat .scannerwork/report-task.txt
           else
-            echo "target/sonar DOES NOT EXIST"
+            echo "WARNING: .scannerwork/report-task.txt not found."
+            echo "The SonarQube scanner command completed."
           fi
-
-          echo
-          echo "Checking target/sonar/report-task.txt..."
-
-          if [ -f "target/sonar/report-task.txt" ]; then
-            echo "SUCCESS: target/sonar/report-task.txt exists."
-            echo
-            cat target/sonar/report-task.txt
-          else
-            echo "ERROR: target/sonar/report-task.txt is missing."
-          fi
-
-          echo
-          echo "======================================"
-          echo "SEARCHING FOR SONAR REPORT FILES"
-          echo "======================================"
-
-          find . -type f \
-            \( -name "report-task.txt" -o -name "*sonar*" \) \
-            -print || true
-
 
       - name: SonarQube Quality Gate
-        if: success()
         uses: SonarSource/sonarqube-quality-gate-action@v1
         timeout-minutes: 5
-        with:
-          scanMetadataReportFile: target/sonar/report-task.txt
-          pollingTimeoutSec: 300
+        continue-on-error: false
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -161,11 +96,10 @@ jobs:
   # ==========================================================
   # 3. UPLOAD WAR TO NEXUS
   # ==========================================================
-
   nexus:
     name: Upload WAR to Nexus
-    needs: sonar
     runs-on: ubuntu-latest
+    needs: sonarqube
 
     steps:
 
@@ -179,112 +113,52 @@ jobs:
           java-version: '21'
           cache: maven
 
-
       - name: Download WAR artifact
         uses: actions/download-artifact@v4
         with:
           name: releasepulse-war
           path: target
 
-
-      - name: Verify WAR
+      - name: Verify WAR file
         run: |
-          echo "======================================"
-          echo "CHECKING WAR FILE"
-          echo "======================================"
-
+          echo "Checking WAR file..."
           ls -lh target/
-
           test -f target/releasepulse.war
 
-          echo
-          echo "WAR file found successfully."
-
-
-      # ------------------------------------------------------
-      # Create Maven settings.xml for Nexus authentication
-      # ------------------------------------------------------
-
-      - name: Configure Maven Nexus credentials
+      - name: Upload WAR to Nexus
         env:
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
         run: |
-          echo "======================================"
-          echo "CONFIGURING NEXUS AUTHENTICATION"
-          echo "======================================"
-
-          cat > nexus-settings.xml <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
-                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
-
-            <servers>
-              <server>
-                <id>nexus-releases</id>
-                <username>${NEXUS_USERNAME}</username>
-                <password>${NEXUS_PASSWORD}</password>
-              </server>
-            </servers>
-
-          </settings>
-          EOF
-
-          echo "Maven Nexus credentials configured."
-
-
-      # ------------------------------------------------------
-      # Upload WAR
-      # ------------------------------------------------------
-
-      - name: Upload WAR to Nexus
-        env:
-          NEXUS_URL: ${{ secrets.NEXUS_URL }}
-        run: |
-          echo "======================================"
-          echo "UPLOADING WAR TO NEXUS"
-          echo "======================================"
-
-          echo "Nexus repository:"
-          echo "$NEXUS_URL"
-
-          mvn -B \
-            -s nexus-settings.xml \
-            deploy:deploy-file \
+          mvn -B deploy:deploy-file \
             -Dfile=target/releasepulse.war \
             -DgroupId=com.releasepulse \
             -DartifactId=releasepulse \
             -Dversion=1.0.0 \
             -Dpackaging=war \
             -DrepositoryId=nexus-releases \
-            -Durl="$NEXUS_URL" \
-            -DgeneratePom=true
-
-          echo
-          echo "======================================"
-          echo "WAR UPLOADED TO NEXUS SUCCESSFULLY"
-          echo "======================================"
-
-
-      - name: Remove Nexus credentials
-        if: always()
-        run: |
-          rm -f nexus-settings.xml
-
-          echo "Temporary Nexus credentials removed."
+            -Durl=http://3.237.61.86:8081/repository/releasepulse-releases/ \
+            --settings settings.xml
 
 
   # ==========================================================
   # 4. DEPLOY TO TOMCAT
   # ==========================================================
-
   deploy:
     name: Deploy to Tomcat
-    needs: nexus
     runs-on: ubuntu-latest
+    needs: nexus
 
     steps:
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
 
       - name: Download WAR artifact
         uses: actions/download-artifact@v4
@@ -292,84 +166,28 @@ jobs:
           name: releasepulse-war
           path: target
 
-
-      - name: Verify WAR
-        run: |
-          echo "======================================"
-          echo "CHECKING WAR FILE"
-          echo "======================================"
-
-          ls -lh target/
-
-          test -f target/releasepulse.war
-
-          echo
-          echo "WAR file found successfully."
-
-
       - name: Deploy WAR to Tomcat
         env:
           TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
-          TOMCAT_USER: ${{ secrets.TOMCAT_USER }}
-          TOMCAT_SSH_KEY: ${{ secrets.TOMCAT_SSH_KEY }}
+          TOMCAT_USERNAME: ${{ secrets.TOMCAT_USERNAME }}
+          TOMCAT_PASSWORD: ${{ secrets.TOMCAT_PASSWORD }}
         run: |
+          echo "Deploying ReleasePulse to Tomcat..."
 
-          echo "======================================"
-          echo "PREPARING SSH KEY"
-          echo "======================================"
+          curl -f -u "${TOMCAT_USERNAME}:${TOMCAT_PASSWORD}" \
+            -T target/releasepulse.war \
+            "http://${TOMCAT_HOST}:8080/manager/text/deploy?path=/releasepulse&update=true"
 
-          echo "$TOMCAT_SSH_KEY" > tomcat_key.pem
-          chmod 600 tomcat_key.pem
+          echo "Deployment completed successfully."
 
+      - name: Verify deployment
+        env:
+          TOMCAT_HOST: ${{ secrets.TOMCAT_HOST }}
+        run: |
+          sleep 10
 
-          echo
-          echo "======================================"
-          echo "STOPPING TOMCAT"
-          echo "======================================"
-
-          ssh \
-            -o StrictHostKeyChecking=no \
-            -i tomcat_key.pem \
-            "$TOMCAT_USER@$TOMCAT_HOST" \
-            "sudo systemctl stop tomcat || true"
-
+          curl -f \
+            "http://${TOMCAT_HOST}:8080/releasepulse/"
 
           echo
-          echo "======================================"
-          echo "COPYING WAR TO TOMCAT SERVER"
-          echo "======================================"
-
-          scp \
-            -o StrictHostKeyChecking=no \
-            -i tomcat_key.pem \
-            target/releasepulse.war \
-            "$TOMCAT_USER@$TOMCAT_HOST:/tmp/releasepulse.war"
-
-
-          echo
-          echo "======================================"
-          echo "INSTALLING WAR"
-          echo "======================================"
-
-          ssh \
-            -o StrictHostKeyChecking=no \
-            -i tomcat_key.pem \
-            "$TOMCAT_USER@$TOMCAT_HOST" \
-            "sudo rm -rf /var/lib/tomcat10/webapps/releasepulse && \
-             sudo rm -f /var/lib/tomcat10/webapps/releasepulse.war && \
-             sudo mv /tmp/releasepulse.war /var/lib/tomcat10/webapps/releasepulse.war && \
-             sudo systemctl start tomcat"
-
-
-          echo
-          echo "======================================"
-          echo "CLEANING SSH KEY"
-          echo "======================================"
-
-          rm -f tomcat_key.pem
-
-
-          echo
-          echo "======================================"
-          echo "TOMCAT DEPLOYMENT COMPLETED"
-          echo "======================================"
+          echo "ReleasePulse deployment verified successfully."
