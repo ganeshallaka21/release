@@ -228,7 +228,7 @@ jobs:
             -Dversion=1.0.0 \
             -Dpackaging=war \
             -DrepositoryId=nexus-releases \
-            -Durl=http://3.237.61.86:8081/repository/releasepulse-releases/ \
+            -Durl=http://44.201.202.122:8081/repository/releasepulse/ \
             --settings settings.xml
 
 
